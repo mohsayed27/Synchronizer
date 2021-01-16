@@ -59,9 +59,12 @@ void up(int sem_id)
     }
 }
 
-key_t msgq_key_id, shm_key_id, sem_key_id;
-int msgq_id, rec_val, shm_id, send_val, sem_id;
-void *shmaddr;
+key_t msgq_key_id, shm_key_id, mutex_sem_key_id, cnt_shm_key_id, idx_shm_key_id;
+int msgq_id, send_val, shm_id, rec_val, mutex_sem_id, cnt_shm_id, cns_idx_shm_id;
+int *shmaddr;
+int* cnt_ptr;
+int* cns_idx_ptr;
+
 
 int main()
 {
@@ -69,25 +72,33 @@ int main()
     
     msgq_key_id = ftok("keyfile", 27);
     shm_key_id = ftok("keyfile", 7);
-    sem_key_id = ftok("keyfile", 2);
+    mutex_sem_key_id = ftok("keyfile", 2);
+    cnt_shm_key_id = ftok("keyfile", 10);
+    idx_shm_key_id = ftok("keyfile", 4);
 
     msgq_id = msgget(msgq_key_id, 0666 | IPC_CREAT);
-    shm_id = shmget(shm_key_id, 4096, IPC_CREAT | 0666);
-    sem_id = semget(sem_key_id, 1, 0666 | IPC_CREAT);
+    shm_id = shmget(shm_key_id, N * sizeof(int), IPC_CREAT | 0666);
+    mutex_sem_id = semget(mutex_sem_key_id, 1, 0666 | IPC_CREAT);
+    cnt_shm_id = shmget(cnt_shm_key_id, sizeof(int), IPC_CREAT | 0666);
+    cns_idx_shm_id = shmget(idx_shm_key_id, sizeof(int), IPC_CREAT | 0666);
 
-    if (msgq_id == -1 || shm_id == -1 || sem_id == -1)
+
+    if (msgq_id == -1 || shm_id == -1 || mutex_sem_id == -1 || cnt_shm_id == -1 || cns_idx_shm_id == -1)
     {
         perror("Error in create");
         exit(-1);
     }
     printf("Message Queue ID = %d\n", msgq_id);
     printf("Shared Memory ID = %d\n", shm_id);
-    printf("Semaphor ID = %d\n", sem_id);
+    printf("Semaphor ID = %d\n", mutex_sem_id);
+
     
-    
+    union Semun semun;
+    struct msgbuff message;
+    message.mtype = 7;
+
     
     shmaddr = shmat(shm_id, (void *)0, 0);
-
     if (shmaddr == -1)
     {
         perror("Error in attach in Server");
@@ -98,26 +109,47 @@ int main()
         printf("\nServer: Shared memory attached at address %x\n", shmaddr);
     }
 
-    struct msgbuff message;
-    message.mtype = 7;
+    cnt_ptr = (int*)shmat(cnt_shm_id, (void *)0, 0);
+    if (shmaddr == NULL)
+    {
+        perror("Error in attach in client");
+        exit(-1);
+    }
+    else
+    {
+        printf("\nClient: Shared memory attached at address %x\n", shmaddr);
+    }
+
+    cns_idx_ptr = shmat(cns_idx_shm_id, (void *)0, 0);
+    if (shmaddr == NULL)
+    {
+        perror("Error in attach in client");
+        exit(-1);
+    }
+    else
+    {
+        printf("\nClient: Shared memory attached at address %x\n", shmaddr);
+    }
+
     
-    int i = 0;
-    int count = 0;
+    int i;
     int item;
     int *buffer = (int*)shmaddr;
 
     while(1)
     {
-        if(0 == count){
+        if(0 == *cnt_ptr){
             rec_val = msgrcv(msgq_id, &message, sizeof(message.mtext), message.mtype, !IPC_NOWAIT);
             if (rec_val == -1)
                 perror("Error in receive");
         }
-        down(sem_id);
-        item = buffer[(i--)%N];
-        up(sem_id);
+        down(mutex_sem_id);
+        i = *cns_idx_ptr;
+        item = buffer[*cns_idx_ptr];
+        *cns_idx_ptr = i - 1 == -1 ? N - 1 : i - 1;
+        up(mutex_sem_id);
 
-        if(N == count){
+        if(N == *cnt_ptr){
             send_val = msgsnd(msgq_id, &message, sizeof(message.mtext), !IPC_NOWAIT);
             if (send_val == -1)
                 perror("Errror in send");
