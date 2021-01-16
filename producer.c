@@ -11,7 +11,7 @@
 #include <ctype.h>
 #include <errno.h>
 
-#define N 100
+#define N 7
 
 struct msgbuff
 {
@@ -60,19 +60,19 @@ void up(int sem_id)
     }
 }
 
-key_t msgq_key_id, shm_key_id, mutex_sem_key_id, prc_sem_key_id, cnt_shm_key_id, idx_shm_key_id;
-int msgq_id, send_val, shm_id, rec_val, mutex_sem_id, prc_sem_id, cnt_shm_id, prod_idx_shm_id;
+key_t msgq_key_id, shm_key_id, mutex_sem_key_id, prc_sem_key_id, cnt_shm_key_id, idx_shm_key_id, prod_sem_key_id;
+int msgq_id, send_val, shm_id, rec_val, mutex_sem_id, prc_sem_id, cnt_shm_id, prod_idx_shm_id, prod_sem_id;
 int *shmaddr;
 int* cnt_ptr;
 int* prod_idx_ptr;
 int init_cnt = 0, init_prod_idx = 0;
+union Semun semun;
+struct msgbuff message;
 
 int main()
 {
     signal(SIGINT, handler);
-   
-    union Semun semun;
-    struct msgbuff message;
+
     message.mtype = 7;
 
     prc_sem_key_id = ftok("keyfile", 104);
@@ -81,6 +81,7 @@ int main()
     mutex_sem_key_id = ftok("keyfile", 2);
     cnt_shm_key_id = ftok("keyfile", 10);
     idx_shm_key_id = ftok("keyfile", 42);
+    prod_sem_key_id = ftok("keyfile", 140);
      
     prc_sem_id = semget(prc_sem_key_id, 1, 0666 | IPC_CREAT | IPC_EXCL);
     if(prc_sem_id == -1){
@@ -100,7 +101,7 @@ int main()
     }
     else{
         semun.val = 1; /* initial value of the semaphore, Binary semaphore */
-        if (semctl(prc_sem_id, 1, SETVAL, semun) == -1)
+        if (semctl(prc_sem_id, 0, SETVAL, semun) == -1)
         {
             perror("Error in semctl");
             exit(-1);
@@ -108,6 +109,31 @@ int main()
         printf("\nProcess Sem was created and initliazed");
     }
 
+    prod_sem_id = semget(prod_sem_key_id, 1, 0666 | IPC_CREAT | IPC_EXCL);
+    if(prod_sem_id == -1){
+        if(errno == EEXIST){
+            printf("\nProducer Sem Already exists");
+            prod_sem_id = semget(prod_sem_key_id, 1, 0666 | IPC_CREAT);
+            if(prod_sem_id == -1){
+                perror("Error in create");
+                exit(-1);
+            }
+            up(prod_sem_id);
+        }
+        else{
+            perror("Error in create");
+            exit(-1);
+        }
+    }
+    else{
+        semun.val = 1; /* initial value of the semaphore, Binary semaphore */
+        if (semctl(prod_sem_id, 0, SETVAL, semun) == -1)
+        {
+            perror("Error in semctl");
+            exit(-1);
+        }
+        printf("\nConsumer Sem was created and initliazed");
+    }
 
     msgq_id = msgget(msgq_key_id, 0666 | IPC_CREAT | IPC_EXCL);
     if(msgq_id == -1){
@@ -158,8 +184,8 @@ int main()
         }
     }
     else{
-        semun.val = 0; /* initial value of the semaphore, Binary semaphore */
-        if (semctl(mutex_sem_id, 1, SETVAL, semun) == -1)
+        semun.val = 1; /* initial value of the semaphore, Binary semaphore */
+        if (semctl(mutex_sem_id, 0, SETVAL, semun) == -1)
         {
             perror("Error in semctl");
             exit(-1);
@@ -257,8 +283,9 @@ int main()
     int i;
 
     while(1){
-        item = prod_cnt + 1;
+        item = ++prod_cnt;
         if(N == *cnt_ptr){
+            printf("\nBuffer is full");
             rec_val = msgrcv(msgq_id, &message, sizeof(message.mtext), message.mtype, !IPC_NOWAIT);
             if (rec_val == -1)
                 perror("Error in receive");
@@ -268,7 +295,8 @@ int main()
         down(mutex_sem_id);
         i = *prod_idx_ptr;
         buffer[i] = item;
-        printf("c\nProduced item %d at pos i = %d", item, i);
+        printf("\nProduced item %d at pos i = %d", item, i);
+        sleep(1);
         *prod_idx_ptr = i + 1 == N ? 0 : i + 1;
         *cnt_ptr += 1;
         up(mutex_sem_id);
@@ -281,27 +309,6 @@ int main()
         }
 
     }
-
-    down(prc_sem_id);
-    rec_val = semctl(prc_sem_id, 1, GETVAL);
-    if(rec_val == -1){
-        perror("Error in semctl");
-        exit(-1);
-    }
-    else{
-        if(rec_val == 0){
-            shmctl(shm_id, IPC_RMID, (struct shmid_ds *)0);
-            shmctl(prod_idx_shm_id, IPC_RMID, (struct shmid_ds *)0);
-            shmctl(cnt_shm_id, IPC_RMID, (struct shmid_ds *)0);
-            semctl(prc_sem_id, 0, IPC_RMID, (struct semid_ds *)0);
-            semctl(mutex_sem_id, 0, IPC_RMID, (struct semid_ds *)0);
-        }
-        else{
-            shmdt(shmaddr);
-            shmdt(prod_idx_ptr);
-            shmdt(cnt_ptr);
-        }
-    }
     return 0;
 }
 
@@ -309,13 +316,16 @@ int main()
 void handler(int signum)
 {
     down(prc_sem_id);
-    rec_val = semctl(prc_sem_id, 1, GETVAL);
+    rec_val = semctl(prc_sem_id, 0, GETVAL, semun);
     if(rec_val == -1){
         perror("Error in semctl");
         exit(-1);
     }
     else{
         if(rec_val == 0){
+            shmdt(shmaddr);
+            shmdt(cnt_ptr);
+            msgctl(msgq_id, IPC_RMID, (struct msqid_ds *)0);
             shmctl(shm_id, IPC_RMID, (struct shmid_ds *)0);
             shmctl(prod_idx_shm_id, IPC_RMID, (struct shmid_ds *)0);
             shmctl(cnt_shm_id, IPC_RMID, (struct shmid_ds *)0);
@@ -326,6 +336,18 @@ void handler(int signum)
             shmdt(shmaddr);
             shmdt(prod_idx_ptr);
             shmdt(cnt_ptr);
+        }
+    }
+    down(prod_sem_id);
+    rec_val = semctl(prc_sem_id, 0, GETVAL, semun);
+    if(rec_val == -1){
+        perror("Error in semctl");
+        exit(-1);
+    }
+    else{
+        if(rec_val == 0){
+            shmdt(prod_idx_ptr);
+            shmctl(prod_idx_shm_id, IPC_RMID, (struct shmid_ds *)0);
         }
     }
     exit(0);
