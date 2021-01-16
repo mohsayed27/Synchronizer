@@ -85,7 +85,12 @@ int main()
     prc_sem_id = semget(prc_sem_key_id, 1, 0666 | IPC_CREAT | IPC_EXCL);
     if(prc_sem_id == -1){
         if(errno == EEXIST){
+            printf("\nProcess Sem Already exists");
             prc_sem_id = semget(prc_sem_key_id, 1, 0666 | IPC_CREAT);
+            if(prc_sem_id == -1){
+                perror("Error in create");
+                exit(-1);
+            }
             up(prc_sem_id);
         }
         else{
@@ -100,13 +105,19 @@ int main()
             perror("Error in semctl");
             exit(-1);
         }
+        printf("\nProcess Sem was created and initliazed");
     }
 
 
     msgq_id = msgget(msgq_key_id, 0666 | IPC_CREAT | IPC_EXCL);
     if(msgq_id == -1){
         if(errno == EEXIST){
+            printf("\nMess Queue Already exists");
             msgq_id = msgget(msgq_key_id, 0666 | IPC_CREAT);
+            if(msgq_id == -1){
+                perror("Error in create");
+                exit(-1);
+            }
         }
         else{
             perror("Error in create");
@@ -117,7 +128,12 @@ int main()
     shm_id = shmget(shm_key_id, N * sizeof(int), IPC_CREAT | 0666 | IPC_EXCL);
     if(shm_id == -1){
         if(errno == EEXIST){
+            printf("\nShared Memory Already exists");
             shm_id = shmget(shm_key_id, N * sizeof(int), IPC_CREAT | 0666);
+            if(shm_id == -1){
+                perror("Error in create");
+                exit(-1);
+            }
         }
         else{
             perror("Error in create");
@@ -129,7 +145,12 @@ int main()
     mutex_sem_id = semget(mutex_sem_key_id, 1, 0666 | IPC_CREAT | IPC_EXCL);
     if(mutex_sem_id == -1){
         if(errno == EEXIST){
+            printf("\nConsumer mutex sem Already exists");
             mutex_sem_id = semget(mutex_sem_key_id, 1, 0666 | IPC_CREAT);
+            if(mutex_sem_id == -1){
+                perror("Error in create");
+                exit(-1);
+            }
         }
         else{
             perror("Error in create");
@@ -143,12 +164,17 @@ int main()
             perror("Error in semctl");
             exit(-1);
         }
+        printf("\nConsumer mutex sem created and init");
     }
 
     cnt_shm_id = shmget(cnt_shm_key_id, sizeof(int), IPC_CREAT | 0666 | IPC_EXCL);
     if(cnt_shm_id == -1){
         if(errno == EEXIST){
             cnt_shm_id = shmget(cnt_shm_key_id, sizeof(int), IPC_CREAT | 0666);
+            if(cnt_shm_id == -1){
+                perror("Error in create");
+                exit(-1);
+            }
         }
         else{
             perror("Error in create");
@@ -156,13 +182,19 @@ int main()
         }
     }
     else{
+        printf("\nConsumer count memory created and will be init");
         init_cnt = 1;
     }
 
     cons_idx_shm_id = shmget(idx_shm_key_id, sizeof(int), IPC_CREAT | 0666 | IPC_EXCL);
     if(cons_idx_shm_id == -1){
         if(errno == EEXIST){
+            printf("\nConsumer index mem Already Exists");
             cons_idx_shm_id = shmget(idx_shm_key_id, sizeof(int), IPC_CREAT | 0666);
+            if(cons_idx_shm_id == -1){
+                perror("Error in create");
+                exit(-1);
+            }
         }
         else{
             perror("Error in create");
@@ -170,6 +202,7 @@ int main()
         }
     }
     else{
+        printf("\nConsumer index memory created and will be init");
         init_cons_idx = 1;
     }
 
@@ -190,7 +223,7 @@ int main()
     }
 
     cnt_ptr = (int*)shmat(cnt_shm_id, (void *)0, 0);
-    if (shmaddr == NULL)
+    if (cnt_ptr == NULL)
     {
         perror("Error in attach in client");
         exit(-1);
@@ -201,7 +234,7 @@ int main()
     }
 
     cons_idx_ptr = shmat(cons_idx_shm_id, (void *)0, 0);
-    if (shmaddr == NULL)
+    if (cons_idx_ptr == NULL)
     {
         perror("Error in attach in client");
         exit(-1);
@@ -228,6 +261,8 @@ int main()
         down(mutex_sem_id);
         i = *cons_idx_ptr;
         item = buffer[i];
+        printf("c\nConsumed item %d at pos i = %d", item, i);
+        sleep(1);
         *cons_idx_ptr = i - 1 == -1 ? N - 1 : i - 1;
         *cnt_ptr -= 1;
         up(mutex_sem_id);
